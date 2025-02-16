@@ -19,8 +19,8 @@
 #include "explorer/ast/expression_category.h"
 #include "explorer/ast/paren_contents.h"
 #include "explorer/ast/value_node.h"
-#include "explorer/common/arena.h"
-#include "explorer/common/source_location.h"
+#include "explorer/base/arena.h"
+#include "explorer/base/source_location.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/Compiler.h"
 
@@ -113,7 +113,7 @@ class RewritableMixin : public Base {
   // Set the rewritten form of this expression. Can only be called during type
   // checking.
   auto set_rewritten_form(Nonnull<const Expression*> rewritten_form) -> void {
-    CARBON_CHECK(!rewritten_form_.has_value()) << "rewritten form set twice";
+    CARBON_CHECK(!rewritten_form_.has_value(), "rewritten form set twice");
     rewritten_form_ = rewritten_form;
     this->set_static_type(&rewritten_form->static_type());
     this->set_expression_category(rewritten_form->expression_category());
@@ -660,8 +660,9 @@ class StructTypeLiteral : public ConstantValueLiteral {
                              std::vector<FieldInitializer> fields)
       : ConstantValueLiteral(AstNodeKind::StructTypeLiteral, loc),
         fields_(std::move(fields)) {
-    CARBON_CHECK(!fields_.empty())
-        << "`{}` is represented as a StructLiteral, not a StructTypeLiteral.";
+    CARBON_CHECK(
+        !fields_.empty(),
+        "`{}` is represented as a StructLiteral, not a StructTypeLiteral.");
   }
 
   explicit StructTypeLiteral(CloneContext& context,

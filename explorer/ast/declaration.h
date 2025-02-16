@@ -20,8 +20,8 @@
 #include "explorer/ast/return_term.h"
 #include "explorer/ast/statement.h"
 #include "explorer/ast/value_node.h"
-#include "explorer/common/nonnull.h"
-#include "explorer/common/source_location.h"
+#include "explorer/base/nonnull.h"
+#include "explorer/base/source_location.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/Compiler.h"
 
@@ -32,7 +32,7 @@ class ConstraintType;
 class NominalClassType;
 class MatchFirstDeclaration;
 
-// Abstract base class of all AST nodes representing patterns.
+// Abstract base class of all AST nodes representing declarations.
 //
 // Declaration and its derived classes support LLVM-style RTTI, including
 // llvm::isa, llvm::cast, and llvm::dyn_cast. To support this, every
@@ -49,6 +49,8 @@ class Declaration : public AstNode {
 
   void Print(llvm::raw_ostream& out) const override;
   void PrintID(llvm::raw_ostream& out) const override;
+
+  virtual void PrintIndent(int indent_num_spaces, llvm::raw_ostream& out) const;
 
   static auto classof(const AstNode* node) -> bool {
     return InheritsFromDeclaration(node->kind());
@@ -99,7 +101,7 @@ class Declaration : public AstNode {
   // Set that this node is declared. Should only be called once, by the
   // type-checker, once the node is ready to be named and used.
   void set_is_declared() {
-    CARBON_CHECK(!is_declared_) << "should not be declared twice";
+    CARBON_CHECK(!is_declared_, "should not be declared twice");
     is_declared_ = true;
   }
 
@@ -109,7 +111,7 @@ class Declaration : public AstNode {
   // Set that this node is type-checked. Should only be called once, by the
   // type-checker, once full type-checking is complete.
   void set_is_type_checked() {
-    CARBON_CHECK(!is_type_checked_) << "should not be type-checked twice";
+    CARBON_CHECK(!is_type_checked_, "should not be type-checked twice");
     is_type_checked_ = true;
   }
 
@@ -141,7 +143,7 @@ inline auto DeclaresSameEntity(const Declaration& first,
 }
 
 // A name being declared in a named declaration.
-class DeclaredName {
+class DeclaredName : public Printable<DeclaredName> {
  public:
   struct NameComponent {
     SourceLocation source_loc;
@@ -238,8 +240,8 @@ class CallableDeclaration : public Declaration {
         body_(context.Clone(other.body_)),
         virt_override_(other.virt_override_) {}
 
-  void PrintDepth(int depth, llvm::raw_ostream& out) const;
-
+  void PrintIndent(int indent_num_spaces,
+                   llvm::raw_ostream& out) const override;
   auto deduced_parameters() const
       -> llvm::ArrayRef<Nonnull<const GenericBinding*>> {
     return deduced_parameters_;
@@ -672,7 +674,7 @@ class VariableDeclaration : public Declaration {
 
   // Can only be called by type-checking, if a conversion was required.
   void set_initializer(Nonnull<Expression*> initializer) {
-    CARBON_CHECK(has_initializer()) << "should not add a new initializer";
+    CARBON_CHECK(has_initializer(), "should not add a new initializer");
     initializer_ = initializer;
   }
 

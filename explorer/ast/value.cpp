@@ -14,12 +14,11 @@
 #include "explorer/ast/element.h"
 #include "explorer/ast/element_path.h"
 #include "explorer/ast/value_transform.h"
-#include "explorer/common/arena.h"
-#include "explorer/common/error_builders.h"
+#include "explorer/base/arena.h"
+#include "explorer/base/error_builders.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/Error.h"
 
 namespace Carbon {
 
@@ -98,7 +97,7 @@ struct NestedValueVisitor {
     // which is not "within" this value, so we shouldn't visit it.
     return true;
   }
-  auto Visit(const VTable&) -> bool { return true; }
+  auto Visit(const VTable*) -> bool { return true; }
 
   llvm::function_ref<bool(const Value*)> callback;
 };
@@ -128,6 +127,7 @@ NominalClassValue::NominalClassValue(
       inits_(inits),
       base_(base),
       class_value_ptr_(class_value_ptr) {
+  CARBON_CHECK(!base || (*base)->class_value_ptr() == class_value_ptr);
   // Update ancestors's class value to point to latest child.
   *class_value_ptr_ = this;
 }
@@ -159,8 +159,8 @@ static auto GetPositionalElement(Nonnull<const TupleValue*> tuple,
                                  const ElementPath::Component& path_comp,
                                  SourceLocation source_loc)
     -> ErrorOr<Nonnull<const Value*>> {
-  CARBON_CHECK(path_comp.element()->kind() == ElementKind::PositionalElement)
-      << "Invalid non-tuple member";
+  CARBON_CHECK(path_comp.element()->kind() == ElementKind::PositionalElement,
+               "Invalid non-tuple member");
   const auto* tuple_element = cast<PositionalElement>(path_comp.element());
   const size_t index = tuple_element->index();
   if (index < 0 || index >= tuple->elements().size()) {
@@ -173,10 +173,10 @@ static auto GetPositionalElement(Nonnull<const TupleValue*> tuple,
 static auto GetNamedElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
                             const ElementPath::Component& field,
                             SourceLocation source_loc,
-                            Nonnull<const Value*> me_value)
+                            std::optional<Nonnull<const Value*>> me_value)
     -> ErrorOr<Nonnull<const Value*>> {
-  CARBON_CHECK(field.element()->kind() == ElementKind::NamedElement)
-      << "Invalid element, expecting NamedElement";
+  CARBON_CHECK(field.element()->kind() == ElementKind::NamedElement,
+               "Invalid element, expecting NamedElement");
   const auto* member = cast<NamedElement>(field.element());
   const auto f = member->name();
   if (field.witness().has_value()) {
@@ -186,7 +186,7 @@ static auto GetNamedElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
     if (const auto* assoc_const =
             dyn_cast_or_null<AssociatedConstantDeclaration>(
                 member->declaration().value_or(nullptr))) {
-      CARBON_CHECK(field.interface()) << "have witness but no interface";
+      CARBON_CHECK(field.interface(), "have witness but no interface");
       // TODO: Use witness to find the value of the constant.
       return arena->New<AssociatedConstant>(v, *field.interface(), assoc_const,
                                             witness);
@@ -199,7 +199,7 @@ static auto GetNamedElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
           mem_decl.has_value()) {
         const auto& fun_decl = cast<FunctionDeclaration>(**mem_decl);
         if (fun_decl.is_method()) {
-          return arena->New<BoundMethodValue>(&fun_decl, me_value,
+          return arena->New<BoundMethodValue>(&fun_decl, *me_value,
                                               &impl_witness->bindings());
         } else {
           // Class function.
@@ -243,7 +243,7 @@ static auto GetNamedElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
           // Found a method. Turn it into a bound method.
           const auto& m = cast<FunctionValue>(**func);
           if (m.declaration().virt_override() == VirtualOverride::None) {
-            return arena->New<BoundMethodValue>(&m.declaration(), me_value,
+            return arena->New<BoundMethodValue>(&m.declaration(), *me_value,
                                                 &class_type.bindings());
           }
           // Method is virtual, get child-most class value and perform vtable
@@ -259,8 +259,8 @@ static auto GetNamedElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
           // Get class value matching the virtual method, and turn it into a
           // bound method.
           for (int i = 0; i < level_diff; ++i) {
-            CARBON_CHECK(m_class_value->base())
-                << "Error trying to access function class value";
+            CARBON_CHECK(m_class_value->base(),
+                         "Error trying to access function class value");
             m_class_value = *m_class_value->base();
           }
           return arena->New<BoundMethodValue>(
@@ -299,14 +299,14 @@ static auto GetNamedElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
                                        &class_type.bindings());
     }
     default:
-      CARBON_FATAL() << "named element access not supported for value " << *v;
+      CARBON_FATAL("named element access not supported for value {0}", *v);
   }
 }
 
 static auto GetElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
                        const ElementPath::Component& path_comp,
                        SourceLocation source_loc,
-                       Nonnull<const Value*> me_value)
+                       std::optional<Nonnull<const Value*>> me_value)
     -> ErrorOr<Nonnull<const Value*>> {
   switch (path_comp.element()->kind()) {
     case ElementKind::NamedElement:
@@ -315,7 +315,7 @@ static auto GetElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
       if (const auto* tuple = dyn_cast<TupleValue>(v)) {
         return GetPositionalElement(tuple, path_comp, source_loc);
       } else {
-        CARBON_FATAL() << "Invalid value for positional element";
+        CARBON_FATAL("Invalid value for positional element");
       }
     }
     case ElementKind::BaseElement:
@@ -328,14 +328,14 @@ static auto GetElement(Nonnull<Arena*> arena, Nonnull<const Value*> v,
               ptr->address().ElementAddress(path_comp.element()));
         }
         default:
-          CARBON_FATAL() << "Invalid value for base element";
+          CARBON_FATAL("Invalid value for base element");
       }
   }
 }
 
 auto Value::GetElement(Nonnull<Arena*> arena, const ElementPath& path,
                        SourceLocation source_loc,
-                       Nonnull<const Value*> me_value) const
+                       std::optional<Nonnull<const Value*>> me_value) const
     -> ErrorOr<Nonnull<const Value*>> {
   Nonnull<const Value*> value(this);
   for (const ElementPath::Component& field : path.components_) {
@@ -375,15 +375,27 @@ static auto SetFieldImpl(
       if (auto inits = SetFieldImpl(arena, &object.inits(), path_begin,
                                     path_end, field_value, source_loc);
           inits.ok()) {
-        return arena->New<NominalClassValue>(
-            &object.type(), *inits, object.base(), object.class_value_ptr());
+        auto* class_value_ptr = arena->New<const NominalClassValue*>();
+        std::vector<const NominalClassValue*> base_path;
+        for (auto base = object.base(); base; base = (*base)->base()) {
+          base_path.push_back(*base);
+        }
+        std::optional<Nonnull<const NominalClassValue*>> base;
+        for (auto* base_path_elem : llvm::reverse(base_path)) {
+          base = arena->New<NominalClassValue>(&base_path_elem->type(),
+                                               &base_path_elem->inits(), base,
+                                               class_value_ptr);
+        }
+        return arena->New<NominalClassValue>(&object.type(), *inits, base,
+                                             class_value_ptr);
       } else if (object.base().has_value()) {
         auto new_base = SetFieldImpl(arena, object.base().value(), path_begin,
                                      path_end, field_value, source_loc);
         if (new_base.ok()) {
+          auto as_nominal_class_value = cast<NominalClassValue>(*new_base);
           return arena->New<NominalClassValue>(
-              &object.type(), &object.inits(),
-              cast<NominalClassValue>(*new_base), object.class_value_ptr());
+              &object.type(), &object.inits(), as_nominal_class_value,
+              as_nominal_class_value->class_value_ptr());
         }
       }
       // Failed to match, show full object content
@@ -392,9 +404,9 @@ static auto SetFieldImpl(
     }
     case Value::Kind::TupleType:
     case Value::Kind::TupleValue: {
-      CARBON_CHECK((*path_begin).element()->kind() ==
-                   ElementKind::PositionalElement)
-          << "Invalid non-positional member for tuple";
+      CARBON_CHECK(
+          (*path_begin).element()->kind() == ElementKind::PositionalElement,
+          "Invalid non-positional member for tuple");
       std::vector<Nonnull<const Value*>> elements =
           cast<TupleValueBase>(*value).elements();
       const size_t index =
@@ -413,7 +425,7 @@ static auto SetFieldImpl(
       }
     }
     default:
-      CARBON_FATAL() << "field access not allowed for value " << *value;
+      CARBON_FATAL("field access not allowed for value {0}", *value);
   }
 }
 
@@ -749,7 +761,7 @@ void Value::Print(llvm::raw_ostream& out) const {
       if (member_name.interface().has_value()) {
         out << *member_name.interface().value();
       }
-      out << "." << member_name;
+      out << "." << member_name.member();
       if (member_name.base_type().has_value() &&
           member_name.interface().has_value()) {
         out << ")";
@@ -829,7 +841,7 @@ void IntrinsicConstraint::Print(llvm::raw_ostream& out) const {
 static auto BindingMapEqual(
     const BindingMap& map1, const BindingMap& map2,
     std::optional<Nonnull<const EqualityContext*>> equality_ctx) -> bool {
-  CARBON_CHECK(map1.size() == map2.size()) << "maps should have same keys";
+  CARBON_CHECK(map1.size() == map2.size(), "maps should have same keys");
   for (const auto& [key, value] : map1) {
     if (!ValueEqual(value, map2.at(key), equality_ctx)) {
       return false;
@@ -1013,24 +1025,23 @@ auto TypeEqual(Nonnull<const Value*> t1, Nonnull<const Value*> t2,
     case Value::Kind::MixinPseudoType:
     case Value::Kind::TypeOfMixinPseudoType:
     case Value::Kind::TypeOfNamespaceName:
-      CARBON_FATAL() << "TypeEqual used to compare non-type values\n"
-                     << *t1 << "\n"
-                     << *t2;
+      CARBON_FATAL("TypeEqual used to compare non-type values\n{0}\n{1}", *t1,
+                   *t2);
     case Value::Kind::ImplWitness:
     case Value::Kind::BindingWitness:
     case Value::Kind::ConstraintWitness:
     case Value::Kind::ConstraintImplWitness:
-      CARBON_FATAL() << "TypeEqual: unexpected Witness";
+      CARBON_FATAL("TypeEqual: unexpected Witness");
       break;
     case Value::Kind::AutoType:
-      CARBON_FATAL() << "TypeEqual: unexpected AutoType";
+      CARBON_FATAL("TypeEqual: unexpected AutoType");
       break;
   }
 }
 
 // Returns true if the two values are known to be equal and are written in the
 // same way at the top level.
-auto ValueStructurallyEqual(
+static auto ValueStructurallyEqual(
     Nonnull<const Value*> v1, Nonnull<const Value*> v2,
     std::optional<Nonnull<const EqualityContext*>> equality_ctx) -> bool {
   if (v1 == v2) {
@@ -1111,8 +1122,8 @@ auto ValueStructurallyEqual(
           GetName(cast<ParameterizedEntityName>(v1)->declaration());
       std::optional<std::string_view> name2 =
           GetName(cast<ParameterizedEntityName>(v2)->declaration());
-      CARBON_CHECK(name1.has_value() && name2.has_value())
-          << "parameterized name refers to unnamed declaration";
+      CARBON_CHECK(name1.has_value() && name2.has_value(),
+                   "parameterized name refers to unnamed declaration");
       return *name1 == *name2;
     }
     case Value::Kind::AssociatedConstant: {
@@ -1159,8 +1170,7 @@ auto ValueStructurallyEqual(
     case Value::Kind::MemberName:
       // TODO: support pointer comparisons once we have a clearer distinction
       // between pointers and lvalues.
-      CARBON_FATAL() << "ValueEqual does not support this kind of value: "
-                     << *v1;
+      CARBON_FATAL("ValueEqual does not support this kind of value: {0}", *v1);
   }
 }
 

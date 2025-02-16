@@ -6,37 +6,82 @@
 
 #include <limits>
 
-#include "llvm/Support/Error.h"
-#include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/ErrorOr.h"
+#include "toolchain/diagnostics/file_diagnostics.h"
 
 namespace Carbon {
 
-auto SourceBuffer::CreateFromFile(llvm::vfs::FileSystem& fs,
-                                  llvm::StringRef filename)
-    -> ErrorOr<SourceBuffer> {
+auto SourceBuffer::MakeFromStdin(DiagnosticConsumer& consumer)
+    -> std::optional<SourceBuffer> {
+  return MakeFromMemoryBuffer(llvm::MemoryBuffer::getSTDIN(), "<stdin>",
+                              /*is_regular_file=*/false, consumer);
+}
+
+auto SourceBuffer::MakeFromFile(llvm::vfs::FileSystem& fs,
+                                llvm::StringRef filename,
+                                DiagnosticConsumer& consumer)
+    -> std::optional<SourceBuffer> {
+  FileDiagnosticEmitter emitter(&consumer);
+
   llvm::ErrorOr<std::unique_ptr<llvm::vfs::File>> file =
       fs.openFileForRead(filename);
   if (file.getError()) {
-    return Error(file.getError().message());
+    CARBON_DIAGNOSTIC(ErrorOpeningFile, Error,
+                      "error opening file for read: {0}", std::string);
+    emitter.Emit(filename, ErrorOpeningFile, file.getError().message());
+    return std::nullopt;
   }
 
   llvm::ErrorOr<llvm::vfs::Status> status = (*file)->status();
   if (status.getError()) {
-    return Error(status.getError().message());
-  }
-  auto size = status->getSize();
-  if (size >= std::numeric_limits<int32_t>::max()) {
-    return Error(
-        llvm::formatv("`{0}` is over the 2GiB input limit.", filename));
+    CARBON_DIAGNOSTIC(ErrorStattingFile, Error, "error statting file: {0}",
+                      std::string);
+    emitter.Emit(filename, ErrorStattingFile, file.getError().message());
+    return std::nullopt;
   }
 
-  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer =
-      (*file)->getBuffer(filename, size, /*RequiresNullTerminator=*/false);
+  // `stat` on a file without a known size gives a size of 0, which causes
+  // `llvm::vfs::File::getBuffer` to produce an empty buffer. Use a size of -1
+  // in this case so we get the complete file contents.
+  bool is_regular_file = status->isRegularFile();
+  int64_t size = is_regular_file ? status->getSize() : -1;
+
+  return MakeFromMemoryBuffer(
+      (*file)->getBuffer(filename, size, /*RequiresNullTerminator=*/false),
+      filename, is_regular_file, consumer);
+}
+
+auto SourceBuffer::MakeFromStringCopy(llvm::StringRef filename,
+                                      llvm::StringRef text,
+                                      DiagnosticConsumer& consumer)
+    -> std::optional<SourceBuffer> {
+  return MakeFromMemoryBuffer(
+      llvm::MemoryBuffer::getMemBufferCopy(text, filename), filename,
+      /*is_regular_file=*/true, consumer);
+}
+
+auto SourceBuffer::MakeFromMemoryBuffer(
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer,
+    llvm::StringRef filename, bool is_regular_file,
+    DiagnosticConsumer& consumer) -> std::optional<SourceBuffer> {
+  FileDiagnosticEmitter emitter(&consumer);
+
   if (buffer.getError()) {
-    return Error(buffer.getError().message());
+    CARBON_DIAGNOSTIC(ErrorReadingFile, Error, "error reading file: {0}",
+                      std::string);
+    emitter.Emit(filename, ErrorReadingFile, buffer.getError().message());
+    return std::nullopt;
   }
 
-  return SourceBuffer(filename.str(), std::move(buffer.get()));
+  if (buffer.get()->getBufferSize() >= std::numeric_limits<int32_t>::max()) {
+    CARBON_DIAGNOSTIC(FileTooLarge, Error,
+                      "file is over the 2GiB input limit; size is {0} bytes",
+                      int64_t);
+    emitter.Emit(filename, FileTooLarge, buffer.get()->getBufferSize());
+    return std::nullopt;
+  }
+
+  return SourceBuffer(filename.str(), std::move(buffer.get()), is_regular_file);
 }
 
 }  // namespace Carbon

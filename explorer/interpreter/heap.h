@@ -11,14 +11,15 @@
 #include "explorer/ast/address.h"
 #include "explorer/ast/value.h"
 #include "explorer/ast/value_node.h"
-#include "explorer/common/nonnull.h"
-#include "explorer/common/source_location.h"
+#include "explorer/base/nonnull.h"
+#include "explorer/base/source_location.h"
+#include "explorer/base/trace_stream.h"
 #include "explorer/interpreter/heap_allocation_interface.h"
 
 namespace Carbon {
 
 // A Heap represents the abstract machine's dynamically allocated memory.
-class Heap : public HeapAllocationInterface {
+class Heap : public HeapAllocationInterface, public Printable<Heap> {
  public:
   enum class ValueState {
     Uninitialized,
@@ -28,7 +29,8 @@ class Heap : public HeapAllocationInterface {
   };
 
   // Constructs an empty Heap.
-  explicit Heap(Nonnull<Arena*> arena) : arena_(arena){};
+  explicit Heap(Nonnull<TraceStream*> trace_stream, Nonnull<Arena*> arena)
+      : arena_(arena), trace_stream_(trace_stream) {}
 
   Heap(const Heap&) = delete;
   auto operator=(const Heap&) -> Heap& = delete;
@@ -68,8 +70,6 @@ class Heap : public HeapAllocationInterface {
   // Print all the values on the heap to the stream `out`.
   void Print(llvm::raw_ostream& out) const;
 
-  LLVM_DUMP_METHOD void Dump() const { Print(llvm::errs()); }
-
   auto arena() const -> Arena& override { return *arena_; }
 
  private:
@@ -96,6 +96,7 @@ class Heap : public HeapAllocationInterface {
   std::vector<Nonnull<const Value*>> values_;
   std::vector<ValueState> states_;
   std::vector<llvm::DenseMap<const AstNode*, Address>> bound_values_;
+  Nonnull<TraceStream*> trace_stream_;
 };
 
 }  // namespace Carbon

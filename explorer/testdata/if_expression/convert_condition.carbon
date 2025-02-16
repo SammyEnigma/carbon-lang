@@ -2,8 +2,7 @@
 // Exceptions. See /LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// AUTOUPDATE
-// CHECK:STDOUT: result: 1
+// NOAUTOUPDATE
 
 package ExplorerTest api;
 
@@ -23,3 +22,5 @@ class LazyEq {
 fn Main() -> i32 {
   return if LazyEq.Make(2, 1 + 1) then 1 else 2;
 }
+
+// CHECK:STDOUT: result: 1

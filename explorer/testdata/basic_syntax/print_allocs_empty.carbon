@@ -2,9 +2,7 @@
 // Exceptions. See /LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// AUTOUPDATE
-// CHECK:STDOUT: 0: Heap{}
-// CHECK:STDOUT: result: 0
+// NOAUTOUPDATE
 
 package ExplorerTest api;
 
@@ -12,3 +10,6 @@ fn Main() -> i32 {
   heap.PrintAllocs();
   return 0;
 }
+
+// CHECK:STDOUT: 0: Heap{}
+// CHECK:STDOUT: result: 0

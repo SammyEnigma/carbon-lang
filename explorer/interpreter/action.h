@@ -18,7 +18,7 @@
 #include "explorer/ast/pattern.h"
 #include "explorer/ast/statement.h"
 #include "explorer/ast/value.h"
-#include "explorer/common/source_location.h"
+#include "explorer/base/source_location.h"
 #include "explorer/interpreter/dictionary.h"
 #include "explorer/interpreter/heap_allocation_interface.h"
 #include "explorer/interpreter/stack.h"
@@ -30,7 +30,7 @@ namespace Carbon {
 
 // A RuntimeScope manages and provides access to the storage for names that are
 // not compile-time constants.
-class RuntimeScope {
+class RuntimeScope : public Printable<RuntimeScope> {
  public:
   // Returns a RuntimeScope whose Get() operation for a given name returns the
   // storage owned by the first entry in `scopes` that defines that name. This
@@ -48,7 +48,6 @@ class RuntimeScope {
   auto operator=(RuntimeScope&&) noexcept -> RuntimeScope&;
 
   void Print(llvm::raw_ostream& out) const;
-  LLVM_DUMP_METHOD void Dump() const { Print(llvm::errs()); }
 
   // Allocates storage for `value_node` in `heap`, and initializes it with
   // `value`.
@@ -109,7 +108,7 @@ class RuntimeScope {
 // The actual behavior of an Action step is defined by Interpreter::Step, not by
 // Action or its subclasses.
 // TODO: consider moving this logic to a virtual method `Step`.
-class Action {
+class Action : public Printable<Action> {
  public:
   enum class Kind {
     LocationAction,
@@ -131,7 +130,6 @@ class Action {
   virtual ~Action() = default;
 
   void Print(llvm::raw_ostream& out) const;
-  LLVM_DUMP_METHOD void Dump() const { Print(llvm::errs()); }
 
   // Resets this Action to its initial state.
   void Clear() {
@@ -143,6 +141,8 @@ class Action {
   // Returns the enumerator corresponding to the most-derived type of this
   // object.
   auto kind() const -> Kind { return kind_; }
+
+  auto kind_string() const -> std::string_view;
 
   // The position or state of the action. Starts at 0 and is typically
   // incremented after each step.
@@ -346,7 +346,7 @@ class StatementAction : public Action {
 
   // Sets the location provided to an initializing expression.
   auto set_location_created(AllocationId location_created) {
-    CARBON_CHECK(!location_created_) << "location created set twice";
+    CARBON_CHECK(!location_created_, "location created set twice");
     location_created_ = location_created;
   }
   // Returns the location provided to an initializing expression, if any.

@@ -15,8 +15,9 @@
 #include "explorer/ast/declaration.h"
 #include "explorer/ast/expression.h"
 #include "explorer/ast/value.h"
-#include "explorer/common/arena.h"
-#include "explorer/common/source_location.h"
+#include "explorer/base/arena.h"
+#include "explorer/base/print_as_id.h"
+#include "explorer/base/source_location.h"
 #include "explorer/interpreter/stack.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
@@ -42,12 +43,12 @@ auto RuntimeScope::operator=(RuntimeScope&& rhs) noexcept -> RuntimeScope& {
 }
 
 void RuntimeScope::Print(llvm::raw_ostream& out) const {
-  out << "{";
+  out << "scope: [";
   llvm::ListSeparator sep;
   for (const auto& [value_node, value] : locals_) {
-    out << sep << value_node.base() << ": " << *value;
+    out << sep << "`" << value_node.base() << "`: `" << *value << "`";
   }
-  out << "}";
+  out << "]";
 }
 
 void RuntimeScope::Bind(ValueNodeView value_node, Address address) {
@@ -55,19 +56,19 @@ void RuntimeScope::Bind(ValueNodeView value_node, Address address) {
   bool success =
       locals_.insert({value_node, heap_->arena().New<LocationValue>(address)})
           .second;
-  CARBON_CHECK(success) << "Duplicate definition of " << value_node.base();
+  CARBON_CHECK(success, "Duplicate definition of {0}", value_node.base());
 }
 
 void RuntimeScope::BindAndPin(ValueNodeView value_node, Address address) {
   Bind(value_node, address);
   bool success = bound_values_.insert(&value_node.base()).second;
-  CARBON_CHECK(success) << "Duplicate pinned node for " << value_node.base();
+  CARBON_CHECK(success, "Duplicate pinned node for {0}", value_node.base());
   heap_->BindValueToReference(value_node, address);
 }
 
 void RuntimeScope::BindLifetimeToScope(Address address) {
-  CARBON_CHECK(address.element_path_.IsEmpty())
-      << "Cannot extend lifetime of a specific sub-element";
+  CARBON_CHECK(address.element_path_.IsEmpty(),
+               "Cannot extend lifetime of a specific sub-element");
   allocations_.push_back(address.allocation_);
 }
 
@@ -76,7 +77,7 @@ void RuntimeScope::BindValue(ValueNodeView value_node,
   CARBON_CHECK(!value_node.constant_value().has_value());
   CARBON_CHECK(value->kind() != Value::Kind::LocationValue);
   bool success = locals_.insert({value_node, value}).second;
-  CARBON_CHECK(success) << "Duplicate definition of " << value_node.base();
+  CARBON_CHECK(success, "Duplicate definition of {0}", value_node.base());
 }
 
 auto RuntimeScope::Initialize(ValueNodeView value_node,
@@ -88,7 +89,7 @@ auto RuntimeScope::Initialize(ValueNodeView value_node,
   const auto* location =
       heap_->arena().New<LocationValue>(Address(allocations_.back()));
   bool success = locals_.insert({value_node, location}).second;
-  CARBON_CHECK(success) << "Duplicate definition of " << value_node.base();
+  CARBON_CHECK(success, "Duplicate definition of {0}", value_node.base());
   return location;
 }
 
@@ -96,11 +97,11 @@ void RuntimeScope::Merge(RuntimeScope other) {
   CARBON_CHECK(heap_ == other.heap_);
   for (auto& element : other.locals_) {
     bool success = locals_.insert(element).second;
-    CARBON_CHECK(success) << "Duplicate definition of " << element.first;
+    CARBON_CHECK(success, "Duplicate definition of {0}", element.first);
   }
   for (const auto* element : other.bound_values_) {
     bool success = bound_values_.insert(element).second;
-    CARBON_CHECK(success) << "Duplicate bound value.";
+    CARBON_CHECK(success, "Duplicate bound value.");
   }
   allocations_.insert(allocations_.end(), other.allocations_.begin(),
                       other.allocations_.end());
@@ -141,54 +142,70 @@ auto RuntimeScope::Capture(
 }
 
 void Action::Print(llvm::raw_ostream& out) const {
+  out << kind_string() << " pos: " << pos_ << " ";
   switch (kind()) {
     case Action::Kind::LocationAction:
-      out << cast<LocationAction>(*this).expression() << " ";
+      out << "`" << cast<LocationAction>(*this).expression() << "`";
       break;
     case Action::Kind::ValueExpressionAction:
-      out << cast<ValueExpressionAction>(*this).expression() << " ";
+      out << "`" << cast<ValueExpressionAction>(*this).expression() << "`";
       break;
     case Action::Kind::ExpressionAction:
-      out << cast<ExpressionAction>(*this).expression() << " ";
+      out << "`" << cast<ExpressionAction>(*this).expression() << "`";
       break;
     case Action::Kind::WitnessAction:
-      out << *cast<WitnessAction>(*this).witness() << " ";
+      out << "`" << *cast<WitnessAction>(*this).witness() << "`";
       break;
     case Action::Kind::StatementAction:
-      cast<StatementAction>(*this).statement().PrintDepth(1, out);
-      out << " ";
+      out << "`" << PrintAsID(cast<StatementAction>(*this).statement()) << "`";
       break;
     case Action::Kind::DeclarationAction:
-      cast<DeclarationAction>(*this).declaration().Print(out);
-      out << " ";
+      out << "`" << PrintAsID(cast<DeclarationAction>(*this).declaration())
+          << "`";
       break;
     case Action::Kind::TypeInstantiationAction:
-      cast<TypeInstantiationAction>(*this).type()->Print(out);
-      out << " ";
+      out << "`" << *cast<TypeInstantiationAction>(*this).type() << "`";
       break;
-    case Action::Kind::ScopeAction:
-      break;
-    case Action::Kind::RecursiveAction:
-      out << "recursive";
-      break;
-    case Action::Kind::CleanUpAction:
-      out << "clean up";
-      break;
-    case Action::Kind::DestroyAction:
-      out << "destroy";
+    default:
       break;
   }
-  out << "." << pos_ << ".";
   if (!results_.empty()) {
-    out << " [[";
+    out << " results: [";
     llvm::ListSeparator sep;
     for (const auto& result : results_) {
-      out << sep << *result;
+      out << sep << "`" << *result << "`";
     }
-    out << "]]";
+    out << "] ";
   }
   if (scope_.has_value()) {
     out << " " << *scope_;
+  }
+}
+
+auto Action::kind_string() const -> std::string_view {
+  switch (kind()) {
+    case Action::Kind::LocationAction:
+      return "LocationAction";
+    case Action::Kind::ValueExpressionAction:
+      return "ValueExpressionAction";
+    case Action::Kind::ExpressionAction:
+      return "ExpressionAction";
+    case Action::Kind::WitnessAction:
+      return "WitnessAction";
+    case Action::Kind::StatementAction:
+      return "StatementAction";
+    case Action::Kind::DeclarationAction:
+      return "DeclarationAction";
+    case Action::Kind::TypeInstantiationAction:
+      return "TypeInstantiationAction";
+    case Action::Kind::ScopeAction:
+      return "ScopeAction";
+    case Action::Kind::RecursiveAction:
+      return "RecursiveAction";
+    case Action::Kind::CleanUpAction:
+      return "CleanUpAction";
+    case Action::Kind::DestroyAction:
+      return "DestroyAction";
   }
 }
 

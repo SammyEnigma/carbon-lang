@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // This doesn't check trace output because it's too slow with it.
-// AUTOUPDATE
-// CHECK:STDOUT: result: 1
+// NOAUTOUPDATE
 
 package ExplorerTest api;
 
@@ -86,3 +85,5 @@ class C {
 fn Main() -> i32 {
   return DoFirst(C, DoSplat(C, 1));
 }
+
+// CHECK:STDOUT: result: 1

@@ -2,11 +2,7 @@
 // Exceptions. See /LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// AUTOUPDATE
-// CHECK:STDOUT: 3
-// CHECK:STDOUT: 7
-// CHECK:STDOUT: 15
-// CHECK:STDOUT: result: 0
+// NOAUTOUPDATE
 
 package ExplorerTest api;
 
@@ -25,3 +21,8 @@ fn Main() -> i32 {
   Print("{0}", (a | 12).n);
   return 0;
 }
+
+// CHECK:STDOUT: 3
+// CHECK:STDOUT: 7
+// CHECK:STDOUT: 15
+// CHECK:STDOUT: result: 0

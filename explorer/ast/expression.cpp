@@ -9,8 +9,8 @@
 
 #include "explorer/ast/pattern.h"
 #include "explorer/ast/value.h"
-#include "explorer/common/arena.h"
-#include "explorer/common/error_builders.h"
+#include "explorer/base/arena.h"
+#include "explorer/base/error_builders.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
@@ -231,8 +231,7 @@ void Expression::Print(llvm::raw_ostream& out) const {
               << *op.arguments()[1];
           break;
         default:
-          CARBON_FATAL() << "Unexpected argument count: "
-                         << op.arguments().size();
+          CARBON_FATAL("Unexpected argument count: {0}", op.arguments().size());
       }
       out << ")";
       break;
@@ -343,12 +342,12 @@ void Expression::PrintID(llvm::raw_ostream& out) const {
     case ExpressionKind::TypeTypeLiteral:
       out << "type";
       break;
-    case ExpressionKind::FunctionTypeLiteral:
-    case ExpressionKind::StructLiteral:
-    case ExpressionKind::ArrayTypeLiteral:
     case ExpressionKind::ValueLiteral:
       out << cast<ConstantValueLiteral>(*this).constant_value();
       break;
+    case ExpressionKind::ArrayTypeLiteral:
+    case ExpressionKind::FunctionTypeLiteral:
+    case ExpressionKind::StructLiteral:
     case ExpressionKind::IndexExpression:
     case ExpressionKind::SimpleMemberAccessExpression:
     case ExpressionKind::CompoundMemberAccessExpression:
